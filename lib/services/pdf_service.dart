@@ -1,39 +1,22 @@
-import 'dart:io';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:ficha_pet/models/pet.dart';
 import 'package:ficha_pet/utils/date_utils.dart';
-import 'dart:convert';
+import 'package:ficha_pet/utils/pet_labels.dart';
+import 'package:ficha_pet/widgets/base64_image.dart' show decodeBase64Image;
 
 class PDFService {
   Future<void> generatePetPDF(Pet pet) async {
     final pdf = pw.Document();
 
     // Decodificar imágenes base64
-    pw.MemoryImage? petImage;
-    pw.MemoryImage? vaccineCardImage;
-
-    if (pet.files.petImage.isNotEmpty) {
-      try {
-        final base64Data = pet.files.petImage.split(',')[1];
-        final imageBytes = base64Decode(base64Data);
-        petImage = pw.MemoryImage(imageBytes);
-      } catch (e) {
-        // Ignorar errores de imagen
-      }
-    }
-
-    if (pet.files.vaccineCard.isNotEmpty) {
-      try {
-        final base64Data = pet.files.vaccineCard.split(',')[1];
-        final imageBytes = base64Decode(base64Data);
-        vaccineCardImage = pw.MemoryImage(imageBytes);
-      } catch (e) {
-        // Ignorar errores de imagen
-      }
-    }
+    final petImageBytes = decodeBase64Image(pet.files.petImage);
+    final vaccineCardBytes = decodeBase64Image(pet.files.vaccineCard);
+    final pw.MemoryImage? petImage =
+        petImageBytes != null ? pw.MemoryImage(petImageBytes) : null;
+    final pw.MemoryImage? vaccineCardImage =
+        vaccineCardBytes != null ? pw.MemoryImage(vaccineCardBytes) : null;
 
     pdf.addPage(
       pw.MultiPage(
@@ -65,17 +48,15 @@ class PDFService {
 
             // Información Básica
             pw.Header(level: 1, text: 'Información Básica'),
-            _buildInfoRow(
-                'Nombre', pet.name.isNotEmpty ? pet.name : 'Sin nombre'),
-            _buildInfoRow('Tipo', pet.type == 'dog' ? 'Perro' : 'Gato'),
-            _buildInfoRow(
-                'Raza', pet.breed.isNotEmpty ? pet.breed : 'Sin raza'),
-            _buildInfoRow('Sexo', pet.gender == 'male' ? 'Macho' : 'Hembra'),
+            _buildInfoRow('Nombre', pet.name.isNotEmpty ? pet.name : 'Sin nombre'),
+            _buildInfoRow('Tipo', petTypeLabel(pet.type)),
+            _buildInfoRow('Raza', pet.breed.isNotEmpty ? pet.breed : 'Sin raza'),
+            _buildInfoRow('Sexo', petGenderLabel(pet.gender)),
             if (pet.birthday.isNotEmpty)
               _buildInfoRow('Nacimiento', formatDate(pet.birthday)),
             if (pet.weight.isNotEmpty)
               _buildInfoRow('Peso', '${pet.weight} kg'),
-            _buildInfoRow('Microchip', pet.chip == 'yes' ? 'Sí' : 'No'),
+            _buildInfoRow('Microchip', petChipLabel(pet.chip)),
             pw.SizedBox(height: 20),
 
             // Vacunación
@@ -86,8 +67,7 @@ class PDFService {
               if (pet.lastVaccineDate.isNotEmpty)
                 _buildInfoRow('Última vacuna', formatDate(pet.lastVaccineDate)),
               if (pet.nextVaccineDate.isNotEmpty)
-                _buildInfoRow(
-                    'Próxima vacuna', formatDate(pet.nextVaccineDate)),
+                _buildInfoRow('Próxima vacuna', formatDate(pet.nextVaccineDate)),
               if (pet.vaccineType.isNotEmpty)
                 _buildInfoRow('Tipo de vacuna', pet.vaccineType),
               if (vaccineCardImage != null) ...[
@@ -150,14 +130,15 @@ class PDFService {
       ),
     );
 
-    // Guardar y abrir PDF
-    final directory = await getApplicationDocumentsDirectory();
-    final file = File('${directory.path}/ficha_pet_${pet.id}.pdf');
-    await file.writeAsBytes(await pdf.save());
-
-    // Abrir el PDF
+    // Abre la vista previa nativa (imprimir / guardar / compartir).
+    // Funciona en Android, iOS, Windows, macOS y Web.
+    final bytes = await pdf.save();
+    final safeName = pet.name.isNotEmpty
+        ? pet.name.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_')
+        : 'mascota';
     await Printing.layoutPdf(
-      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name: 'ficha_pet_$safeName.pdf',
+      onLayout: (PdfPageFormat format) async => bytes,
     );
   }
 
@@ -180,3 +161,4 @@ class PDFService {
     );
   }
 }
+

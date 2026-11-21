@@ -1,0 +1,13 @@
+{
+  "name": "ficha-pet-server",
+  "version": "2.0.0",
+  "description": "Backend API REST, Base de Datos y Motor de Notificaciones Push para Ficha Pet",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "init-db": "node server.js --init-only"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

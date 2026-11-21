@@ -1,18 +1,20 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import 'package:ficha_pet/providers/pet_provider.dart';
 import 'package:ficha_pet/models/pet.dart';
-import 'package:ficha_pet/utils/app_theme.dart';
 import 'package:ficha_pet/utils/date_utils.dart' as date_utils;
-import 'package:ficha_pet/services/file_service.dart';
+import 'package:ficha_pet/utils/pet_labels.dart';
+import 'package:ficha_pet/widgets/base64_image.dart';
 
 class EditPetScreen extends StatefulWidget {
-  final int? petIndex;
+  /// `null` para crear una mascota nueva.
+  final int? petId;
 
-  const EditPetScreen({super.key, this.petIndex});
+  const EditPetScreen({super.key, this.petId});
 
   @override
   State<EditPetScreen> createState() => _EditPetScreenState();
@@ -37,99 +39,106 @@ class _EditPetScreenState extends State<EditPetScreen> {
   String _selectedType = '';
   String _selectedGender = '';
   String _selectedChip = '';
-  String? _petImageBase64;
-  String? _vaccineCardBase64;
-  final FileService _fileService = FileService();
-  bool _isLoading = false;
+  String _petImageBase64 = '';
+  String _vaccineCardBase64 = '';
+  bool _isSaving = false;
 
   Pet? _currentPet;
+
+  bool get _isEditing => widget.petId != null;
 
   @override
   void initState() {
     super.initState();
-    if (widget.petIndex != null) {
-      _loadPetData();
-    }
-    _calculateNextVaccineDate();
-    _calculateNextDewormingDate();
+    if (_isEditing) _loadPetData();
   }
 
   void _loadPetData() {
     final provider = Provider.of<PetProvider>(context, listen: false);
-    if (widget.petIndex != null && widget.petIndex! < provider.pets.length) {
-      _currentPet = provider.pets[widget.petIndex!];
-      _nameController.text = _currentPet!.name;
-      _birthdayController.text = _currentPet!.birthday;
-      _weightController.text = _currentPet!.weight;
-      _breedController.text = _currentPet!.breed;
-      _vaccineTypeController.text = _currentPet!.vaccineType;
-      _lastVaccineDateController.text = _currentPet!.lastVaccineDate;
-      _nextVaccineDateController.text = _currentPet!.nextVaccineDate;
-      _dewormingProductController.text = _currentPet!.dewormingProduct;
-      _lastDewormingDateController.text = _currentPet!.lastDewormingDate;
-      _nextDewormingDateController.text = _currentPet!.nextDewormingDate;
-      _selectedType = _currentPet!.type;
-      _selectedGender = _currentPet!.gender;
-      _selectedChip = _currentPet!.chip;
-      _petImageBase64 = _currentPet!.files.petImage;
-      _vaccineCardBase64 = _currentPet!.files.vaccineCard;
-      _emergencyNameController.text = _currentPet!.emergencyContact.name;
-      _emergencyPhoneController.text = _currentPet!.emergencyContact.phone;
-      _emergencyAddressController.text = _currentPet!.emergencyContact.address;
+    final pet = provider.getPetById(widget.petId);
+    if (pet == null) return;
+    _currentPet = pet;
+    _nameController.text = pet.name;
+    _birthdayController.text = pet.birthday;
+    _weightController.text = pet.weight;
+    _breedController.text = pet.breed;
+    _vaccineTypeController.text = pet.vaccineType;
+    _lastVaccineDateController.text = pet.lastVaccineDate;
+    _nextVaccineDateController.text = pet.nextVaccineDate;
+    _dewormingProductController.text = pet.dewormingProduct;
+    _lastDewormingDateController.text = pet.lastDewormingDate;
+    _nextDewormingDateController.text = pet.nextDewormingDate;
+    _selectedType = pet.type;
+    _selectedGender = pet.gender;
+    _selectedChip = pet.chip;
+    _petImageBase64 = pet.files.petImage;
+    _vaccineCardBase64 = pet.files.vaccineCard;
+    _emergencyNameController.text = pet.emergencyContact.name;
+    _emergencyPhoneController.text = pet.emergencyContact.phone;
+    _emergencyAddressController.text = pet.emergencyContact.address;
+  }
+
+  /// Propone la próxima fecha sumando [days] a la última.
+  void _suggestNextDate(
+      TextEditingController last, TextEditingController next, int days) {
+    final lastDate = DateTime.tryParse(last.text);
+    if (lastDate == null) return;
+    next.text =
+        date_utils.formatDateForInput(lastDate.add(Duration(days: days)));
+  }
+
+  Future<void> _pickDate(
+    TextEditingController controller, {
+    required DateTime firstDate,
+    required DateTime lastDate,
+    VoidCallback? onPicked,
+  }) async {
+    final current = DateTime.tryParse(controller.text);
+    var initial = current ?? DateTime.now();
+    if (initial.isBefore(firstDate)) initial = firstDate;
+    if (initial.isAfter(lastDate)) initial = lastDate;
+
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: firstDate,
+      lastDate: lastDate,
+    );
+    if (date != null) {
+      setState(() {
+        controller.text = date_utils.formatDateForInput(date);
+        onPicked?.call();
+      });
     }
   }
 
-  void _calculateNextVaccineDate() {
-    if (_lastVaccineDateController.text.isNotEmpty) {
-      try {
-        final lastDate = DateTime.parse(_lastVaccineDateController.text);
-        final nextDate = lastDate.add(const Duration(days: 365));
-        _nextVaccineDateController.text =
-            date_utils.formatDateForInput(nextDate);
-      } catch (e) {
-        // Ignorar errores de parsing
-      }
-    }
-  }
-
-  void _calculateNextDewormingDate() {
-    if (_lastDewormingDateController.text.isNotEmpty) {
-      try {
-        final lastDate = DateTime.parse(_lastDewormingDateController.text);
-        final nextDate = lastDate.add(const Duration(days: 180));
-        _nextDewormingDateController.text =
-            date_utils.formatDateForInput(nextDate);
-      } catch (e) {
-        // Ignorar errores de parsing
-      }
-    }
-  }
-
-  Future<void> _pickImage(ImageSource source) async {
+  Future<void> _pickImage(ImageSource source, {required bool isPetImage}) async {
     try {
       final picker = ImagePicker();
-      final image = await picker.pickImage(source: source);
-      if (image != null) {
-        final base64 = await _fileService.imageToBase64(image.path);
-        setState(() {
-          _petImageBase64 = base64;
-        });
-      }
-    } catch (e) {
-      _showSnackBar('Error al seleccionar imagen: $e');
-    }
-  }
-
-  Future<void> _pickVaccineCard(ImageSource source) async {
-    try {
-      final picker = ImagePicker();
-      final image = await picker.pickImage(source: source);
-      if (image != null) {
-        final base64 = await _fileService.imageToBase64(image.path);
-        setState(() {
-          _vaccineCardBase64 = base64;
-        });
-      }
+      // Se reduce tamaño/calidad para no saturar el almacenamiento local.
+      final image = await picker.pickImage(
+        source: source,
+        maxWidth: isPetImage ? 800 : 1600,
+        maxHeight: isPetImage ? 800 : 1600,
+        imageQuality: 80,
+      );
+      if (image == null) return;
+      final bytes = await image.readAsBytes();
+      final name = image.name.toLowerCase();
+      final mime = image.mimeType ??
+          (name.endsWith('.png')
+              ? 'image/png'
+              : name.endsWith('.webp')
+                  ? 'image/webp'
+                  : 'image/jpeg');
+      final dataUri = 'data:$mime;base64,${base64Encode(bytes)}';
+      setState(() {
+        if (isPetImage) {
+          _petImageBase64 = dataUri;
+        } else {
+          _vaccineCardBase64 = dataUri;
+        }
+      });
     } catch (e) {
       _showSnackBar('Error al seleccionar imagen: $e');
     }
@@ -137,82 +146,80 @@ class _EditPetScreenState extends State<EditPetScreen> {
 
   Future<void> _savePet() async {
     if (!_formKey.currentState!.validate()) {
+      _showSnackBar('Revisa los campos marcados en rojo');
       return;
     }
-
     if (_selectedType.isEmpty) {
       _showSnackBar('Por favor selecciona el tipo de mascota');
       return;
     }
-
     if (_selectedGender.isEmpty) {
       _showSnackBar('Por favor selecciona el sexo');
       return;
     }
-
     if (_selectedChip.isEmpty) {
       _showSnackBar('Por favor selecciona si tiene microchip');
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-    });
+    setState(() => _isSaving = true);
 
     try {
       final provider = Provider.of<PetProvider>(context, listen: false);
       final pet = Pet(
         id: _currentPet?.id,
-        name: _nameController.text,
+        ownerId: _currentPet?.ownerId ?? '',
+        linkedVetIds: List.of(_currentPet?.linkedVetIds ?? []),
+        name: _nameController.text.trim(),
         type: _selectedType,
         birthday: _birthdayController.text,
-        weight: _weightController.text,
+        weight: _weightController.text.trim().replaceAll(',', '.'),
         gender: _selectedGender,
-        breed: _breedController.text,
+        breed: _breedController.text.trim(),
         chip: _selectedChip,
         lastVaccineDate: _lastVaccineDateController.text,
         nextVaccineDate: _nextVaccineDateController.text,
-        vaccineType: _vaccineTypeController.text,
+        vaccineType: _vaccineTypeController.text.trim(),
         lastDewormingDate: _lastDewormingDateController.text,
         nextDewormingDate: _nextDewormingDateController.text,
-        dewormingProduct: _dewormingProductController.text,
-        medicalHistory: _currentPet?.medicalHistory ?? [],
-        weightHistory: _currentPet?.weightHistory ?? [],
+        dewormingProduct: _dewormingProductController.text.trim(),
+        medicalHistory: List.of(_currentPet?.medicalHistory ?? []),
+        weightHistory: List.of(_currentPet?.weightHistory ?? []),
         files: PetFiles(
-          petImage: _petImageBase64 ?? '',
-          vaccineCard: _vaccineCardBase64 ?? '',
-          exams: _currentPet?.files.exams ?? [],
+          petImage: _petImageBase64,
+          vaccineCard: _vaccineCardBase64,
+          exams: List.of(_currentPet?.files.exams ?? []),
         ),
         emergencyContact: EmergencyContact(
-          name: _emergencyNameController.text,
-          phone: _emergencyPhoneController.text,
-          address: _emergencyAddressController.text,
+          name: _emergencyNameController.text.trim(),
+          phone: _emergencyPhoneController.text.trim(),
+          address: _emergencyAddressController.text.trim(),
         ),
       );
 
-      if (widget.petIndex != null) {
-        await provider.updatePet(widget.petIndex!, pet);
-        _showSnackBar('Mascota actualizada correctamente');
+      if (_isEditing && _currentPet != null) {
+        await provider.updatePet(pet);
       } else {
         await provider.addPet(pet);
-        _showSnackBar('Mascota agregada correctamente');
       }
 
-      if (mounted) {
-        Navigator.pop(context);
-      }
+      if (!mounted) return;
+      final messenger = ScaffoldMessenger.of(context);
+      Navigator.pop(context);
+      messenger.showSnackBar(SnackBar(
+        content: Text(_isEditing
+            ? 'Mascota actualizada correctamente'
+            : 'Mascota agregada correctamente'),
+      ));
     } catch (e) {
       _showSnackBar('Error al guardar: $e');
     } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
+      if (mounted) setState(() => _isSaving = false);
     }
   }
 
   void _showSnackBar(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message)),
     );
@@ -220,81 +227,57 @@ class _EditPetScreenState extends State<EditPetScreen> {
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _birthdayController.dispose();
-    _weightController.dispose();
-    _breedController.dispose();
-    _vaccineTypeController.dispose();
-    _lastVaccineDateController.dispose();
-    _nextVaccineDateController.dispose();
-    _dewormingProductController.dispose();
-    _lastDewormingDateController.dispose();
-    _nextDewormingDateController.dispose();
-    _emergencyNameController.dispose();
-    _emergencyPhoneController.dispose();
-    _emergencyAddressController.dispose();
+    for (final c in [
+      _nameController,
+      _birthdayController,
+      _weightController,
+      _breedController,
+      _vaccineTypeController,
+      _lastVaccineDateController,
+      _nextVaccineDateController,
+      _dewormingProductController,
+      _lastDewormingDateController,
+      _nextDewormingDateController,
+      _emergencyNameController,
+      _emergencyPhoneController,
+      _emergencyAddressController,
+    ]) {
+      c.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
     return Scaffold(
       appBar: AppBar(
-        title:
-            Text(widget.petIndex != null ? 'Editar Mascota' : 'Nueva Mascota'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
+        title: Text(_isEditing ? 'Editar Mascota' : 'Nueva Mascota'),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
+      body: AbsorbPointer(
+        absorbing: _isSaving,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 720),
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Form(
                 key: _formKey,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Sección Perfil
                     _buildSectionTitle('Perfil'),
                     const SizedBox(height: 16),
-                    Center(
-                      child: GestureDetector(
-                        onTap: () => _showImagePickerDialog(true),
-                        child: Container(
-                          width: 120,
-                          height: 120,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.grey[200],
-                            border: Border.all(color: Colors.grey[300]!),
-                          ),
-                          child: _petImageBase64 != null &&
-                                  _petImageBase64!.isNotEmpty
-                              ? ClipOval(
-                                  child: Image.memory(
-                                  base64Decode(
-                                      _petImageBase64!.split(',').last),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return const Icon(Icons.camera_alt,
-                                        size: 50);
-                                  },
-                                ))
-                              : const Icon(Icons.camera_alt, size: 50),
-                        ),
-                      ),
-                    ),
+                    Center(child: _buildProfileImage()),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _nameController,
+                      textCapitalization: TextCapitalization.words,
                       decoration: const InputDecoration(
-                        labelText: 'Nombre de la mascota',
-                        border: OutlineInputBorder(),
+                        labelText: 'Nombre de la mascota *',
                       ),
                       validator: (value) {
-                        if (value == null || value.isEmpty) {
+                        if (value == null || value.trim().isEmpty) {
                           return 'Por favor ingresa un nombre';
                         }
                         return null;
@@ -302,204 +285,209 @@ class _EditPetScreenState extends State<EditPetScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    // Información Básica
                     _buildSectionTitle('Información Básica'),
                     const SizedBox(height: 16),
-                    _buildTypeSelector(),
+                    _buildSelector(
+                      title: 'Tipo *',
+                      selected: _selectedType,
+                      options: [
+                        ('dog', 'Perro', petTypeIcon('dog')),
+                        ('cat', 'Gato', petTypeIcon('cat')),
+                      ],
+                      onChanged: (v) => setState(() => _selectedType = v),
+                    ),
                     const SizedBox(height: 16),
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: TextFormField(
+                          child: _buildDateField(
                             controller: _birthdayController,
-                            decoration: const InputDecoration(
-                              labelText: 'Nacimiento',
-                              border: OutlineInputBorder(),
+                            label: 'Nacimiento',
+                            onTap: () => _pickDate(
+                              _birthdayController,
+                              firstDate: DateTime(1990),
+                              lastDate: now,
                             ),
-                            readOnly: true,
-                            onTap: () async {
-                              final date = await showDatePicker(
-                                context: context,
-                                initialDate: DateTime.now(),
-                                firstDate: DateTime(1900),
-                                lastDate: DateTime.now(),
-                              );
-                              if (date != null) {
-                                _birthdayController.text =
-                                    date_utils.formatDateForInput(date);
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _weightController,
+                            decoration: const InputDecoration(
+                              labelText: 'Peso (kg)',
+                              suffixText: 'kg',
+                            ),
+                            keyboardType: const TextInputType.numberWithOptions(
+                                decimal: true),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                  RegExp(r'[0-9.,]')),
+                            ],
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return null;
                               }
+                              final w = double.tryParse(
+                                  value.trim().replaceAll(',', '.'));
+                              if (w == null || w <= 0 || w > 200) {
+                                return 'Peso no válido';
+                              }
+                              return null;
                             },
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    _buildGenderSelector(),
+                    _buildSelector(
+                      title: 'Sexo *',
+                      selected: _selectedGender,
+                      options: const [
+                        ('male', 'Macho', Icons.male),
+                        ('female', 'Hembra', Icons.female),
+                      ],
+                      onChanged: (v) => setState(() => _selectedGender = v),
+                    ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _breedController,
-                      decoration: const InputDecoration(
-                        labelText: 'Raza',
-                        border: OutlineInputBorder(),
-                      ),
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(labelText: 'Raza'),
                     ),
                     const SizedBox(height: 16),
-                    _buildChipSelector(),
+                    _buildSelector(
+                      title: 'Microchip *',
+                      selected: _selectedChip,
+                      options: const [
+                        ('yes', 'Sí', Icons.check),
+                        ('no', 'No', Icons.close),
+                      ],
+                      onChanged: (v) => setState(() => _selectedChip = v),
+                    ),
                     const SizedBox(height: 24),
 
-                    // Salud y Prevención
-                    _buildSectionTitle('Salud y Prevención'),
+                    _buildSectionTitle('Vacunación'),
                     const SizedBox(height: 16),
-                    TextFormField(
+                    _buildDateField(
                       controller: _lastVaccineDateController,
-                      decoration: const InputDecoration(
-                        labelText: 'Fecha de última vacuna',
-                        border: OutlineInputBorder(),
+                      label: 'Fecha de última vacuna',
+                      onTap: () => _pickDate(
+                        _lastVaccineDateController,
+                        firstDate: DateTime(2000),
+                        lastDate: now,
+                        onPicked: () => _suggestNextDate(
+                            _lastVaccineDateController,
+                            _nextVaccineDateController,
+                            365),
                       ),
-                      readOnly: true,
-                      onTap: () async {
-                        final date = await showDatePicker(
-                          context: context,
-                          initialDate: DateTime.now(),
-                          firstDate: DateTime(2000),
-                          lastDate: DateTime.now(),
-                        );
-                        if (date != null) {
-                          _lastVaccineDateController.text =
-                              date_utils.formatDateForInput(date);
-                          _calculateNextVaccineDate();
-                        }
-                      },
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
+                    _buildDateField(
                       controller: _nextVaccineDateController,
-                      decoration: const InputDecoration(
-                        labelText: 'Fecha de próxima vacuna',
-                        border: OutlineInputBorder(),
+                      label: 'Fecha de próxima vacuna',
+                      helper: 'Se propone 1 año después; puedes cambiarla',
+                      onTap: () => _pickDate(
+                        _nextVaccineDateController,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(now.year + 5),
                       ),
-                      readOnly: true,
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _vaccineTypeController,
-                      decoration: const InputDecoration(
-                        labelText: 'Tipo de vacuna',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration:
+                          const InputDecoration(labelText: 'Tipo de vacuna'),
                     ),
                     const SizedBox(height: 16),
                     const Text('Carnet de vacunación',
                         style: TextStyle(fontWeight: FontWeight.w500)),
                     const SizedBox(height: 8),
-                    GestureDetector(
-                      onTap: () => _showImagePickerDialog(false),
-                      child: Container(
-                        height: 150,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey[300]!),
-                        ),
-                        child: _vaccineCardBase64 != null &&
-                                _vaccineCardBase64!.isNotEmpty
-                            ? ClipRRect(
-                                borderRadius: BorderRadius.circular(8),
-                                child: Image.memory(
-                                  base64Decode(
-                                      _vaccineCardBase64!.split(',').last),
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return const Icon(Icons.camera_alt,
-                                        size: 50);
-                                  },
-                                ),
-                              )
-                            : const Center(
-                                child: Icon(Icons.camera_alt, size: 50),
-                              ),
-                      ),
-                    ),
+                    _buildVaccineCard(),
                     const SizedBox(height: 24),
-                    TextFormField(
+
+                    _buildSectionTitle('Desparasitación'),
+                    const SizedBox(height: 16),
+                    _buildDateField(
                       controller: _lastDewormingDateController,
-                      decoration: const InputDecoration(
-                        labelText: 'Fecha de última desparasitación',
-                        border: OutlineInputBorder(),
+                      label: 'Fecha de última desparasitación',
+                      onTap: () => _pickDate(
+                        _lastDewormingDateController,
+                        firstDate: DateTime(2000),
+                        lastDate: now,
+                        onPicked: () => _suggestNextDate(
+                            _lastDewormingDateController,
+                            _nextDewormingDateController,
+                            180),
                       ),
-                      readOnly: true,
-                      onTap: () async {
-                        final date = await showDatePicker(
-                          context: context,
-                          initialDate: DateTime.now(),
-                          firstDate: DateTime(2000),
-                          lastDate: DateTime.now(),
-                        );
-                        if (date != null) {
-                          _lastDewormingDateController.text =
-                              date_utils.formatDateForInput(date);
-                          _calculateNextDewormingDate();
-                        }
-                      },
                     ),
                     const SizedBox(height: 16),
-                    TextFormField(
+                    _buildDateField(
                       controller: _nextDewormingDateController,
-                      decoration: const InputDecoration(
-                        labelText: 'Fecha de próxima desparasitación',
-                        border: OutlineInputBorder(),
+                      label: 'Fecha de próxima desparasitación',
+                      helper: 'Se propone 6 meses después; puedes cambiarla',
+                      onTap: () => _pickDate(
+                        _nextDewormingDateController,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime(now.year + 5),
                       ),
-                      readOnly: true,
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _dewormingProductController,
                       decoration: const InputDecoration(
-                        labelText: 'Producto de desparasitación',
-                        border: OutlineInputBorder(),
-                      ),
+                          labelText: 'Producto de desparasitación'),
                     ),
                     const SizedBox(height: 24),
 
-                    // Contacto de Emergencia
                     _buildSectionTitle('Contacto de Emergencia'),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _emergencyNameController,
-                      decoration: const InputDecoration(
-                        labelText: 'Nombre',
-                        border: OutlineInputBorder(),
-                      ),
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(labelText: 'Nombre'),
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _emergencyPhoneController,
-                      decoration: const InputDecoration(
-                        labelText: 'Teléfono',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: 'Teléfono'),
                       keyboardType: TextInputType.phone,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                            RegExp(r'[0-9+\-\s()]')),
+                      ],
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) return null;
+                        final digits = value.replaceAll(RegExp(r'\D'), '');
+                        if (digits.length < 7) return 'Teléfono no válido';
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: _emergencyAddressController,
-                      decoration: const InputDecoration(
-                        labelText: 'Dirección',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: 'Dirección'),
                       maxLines: 2,
                     ),
                     const SizedBox(height: 32),
 
-                    // Botón Guardar
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: _savePet,
+                      child: ElevatedButton.icon(
+                        onPressed: _isSaving ? null : _savePet,
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 16),
                         ),
-                        child: const Text('Guardar'),
+                        icon: _isSaving
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.save),
+                        label: Text(_isSaving ? 'Guardando...' : 'Guardar'),
                       ),
                     ),
                     const SizedBox(height: 32),
@@ -507,113 +495,177 @@ class _EditPetScreenState extends State<EditPetScreen> {
                 ),
               ),
             ),
-    );
-  }
-
-  Widget _buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: const TextStyle(
-        fontSize: 20,
-        fontWeight: FontWeight.w600,
-        color: AppTheme.textPrimary,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _buildTypeSelector() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildProfileImage() {
+    final scheme = Theme.of(context).colorScheme;
+    return Stack(
       children: [
-        const Text('Tipo', style: TextStyle(fontWeight: FontWeight.w500)),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: _buildSelectionButton(
-                label: 'Perro',
-                icon: Icons.pets,
-                value: 'dog',
-                selectedValue: _selectedType,
-                onTap: () => setState(() => _selectedType = 'dog'),
+        GestureDetector(
+          onTap: () => _showImagePickerDialog(isPetImage: true),
+          child: Container(
+            width: 120,
+            height: 120,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: scheme.surfaceContainerHighest,
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            child: ClipOval(
+              child: Base64Image(
+                source: _petImageBase64,
+                placeholder: Icon(
+                  Icons.camera_alt_rounded,
+                  size: 46,
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _buildSelectionButton(
-                label: 'Gato',
-                icon: Icons.pets,
-                value: 'cat',
-                selectedValue: _selectedType,
-                onTap: () => setState(() => _selectedType = 'cat'),
-              ),
-            ),
-          ],
+          ),
         ),
+        if (_petImageBase64.isNotEmpty)
+          Positioned(
+            right: 0,
+            top: 0,
+            child: _removeButton(() => setState(() => _petImageBase64 = '')),
+          ),
       ],
     );
   }
 
-  Widget _buildGenderSelector() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildVaccineCard() {
+    final scheme = Theme.of(context).colorScheme;
+    return Stack(
       children: [
-        const Text('Sexo', style: TextStyle(fontWeight: FontWeight.w500)),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: _buildSelectionButton(
-                label: 'Macho',
-                icon: Icons.male,
-                value: 'male',
-                selectedValue: _selectedGender,
-                onTap: () => setState(() => _selectedGender = 'male'),
+        GestureDetector(
+          onTap: () => _showImagePickerDialog(isPetImage: false),
+          child: Container(
+            height: 160,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Base64Image(
+                source: _vaccineCardBase64,
+                fit: BoxFit.contain,
+                placeholder: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.add_photo_alternate_rounded,
+                          size: 44, color: scheme.onSurfaceVariant),
+                      const SizedBox(height: 6),
+                      Text('Toca para agregar una foto',
+                          style: TextStyle(color: scheme.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _buildSelectionButton(
-                label: 'Hembra',
-                icon: Icons.female,
-                value: 'female',
-                selectedValue: _selectedGender,
-                onTap: () => setState(() => _selectedGender = 'female'),
-              ),
-            ),
-          ],
+          ),
         ),
+        if (_vaccineCardBase64.isNotEmpty)
+          Positioned(
+            right: 6,
+            top: 6,
+            child:
+                _removeButton(() => setState(() => _vaccineCardBase64 = '')),
+          ),
       ],
     );
   }
 
-  Widget _buildChipSelector() {
+  Widget _removeButton(VoidCallback onPressed) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      shape: const CircleBorder(),
+      elevation: 2,
+      child: IconButton(
+        tooltip: 'Quitar imagen',
+        visualDensity: VisualDensity.compact,
+        icon: Icon(Icons.close_rounded, size: 18, color: scheme.onErrorContainer),
+        onPressed: onPressed,
+      ),
+    );
+  }
+
+  Widget _buildDateField({
+    required TextEditingController controller,
+    required String label,
+    required VoidCallback onTap,
+    String? helper,
+  }) {
+    return TextFormField(
+      controller: controller,
+      readOnly: true,
+      onTap: onTap,
+      decoration: InputDecoration(
+        labelText: label,
+        helperText: helper,
+        prefixIcon: const Icon(Icons.event_rounded),
+        suffixIcon: controller.text.isEmpty
+            ? null
+            : IconButton(
+                tooltip: 'Borrar fecha',
+                icon: const Icon(Icons.clear_rounded),
+                onPressed: () => setState(() => controller.clear()),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    final scheme = Theme.of(context).colorScheme;
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: 20,
+        fontWeight: FontWeight.w800,
+        color: scheme.onSurface,
+      ),
+    );
+  }
+
+  Widget _buildSelector({
+    required String title,
+    required String selected,
+    required List<(String, String, IconData)> options,
+    required ValueChanged<String> onChanged,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Microchip', style: TextStyle(fontWeight: FontWeight.w500)),
+        Text(
+          title,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: scheme.onSurface,
+          ),
+        ),
         const SizedBox(height: 8),
         Row(
           children: [
-            Expanded(
-              child: _buildSelectionButton(
-                label: 'Sí',
-                icon: Icons.check,
-                value: 'yes',
-                selectedValue: _selectedChip,
-                onTap: () => setState(() => _selectedChip = 'yes'),
+            for (var i = 0; i < options.length; i++) ...[
+              if (i > 0) const SizedBox(width: 8),
+              Expanded(
+                child: _buildSelectionButton(
+                  label: options[i].$2,
+                  icon: options[i].$3,
+                  isSelected: options[i].$1 == selected,
+                  onTap: () => onChanged(options[i].$1),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _buildSelectionButton(
-                label: 'No',
-                icon: Icons.close,
-                value: 'no',
-                selectedValue: _selectedChip,
-                onTap: () => setState(() => _selectedChip = 'no'),
-              ),
-            ),
+            ],
           ],
         ),
       ],
@@ -623,35 +675,42 @@ class _EditPetScreenState extends State<EditPetScreen> {
   Widget _buildSelectionButton({
     required String label,
     required IconData icon,
-    required String value,
-    required String selectedValue,
+    required bool isSelected,
     required VoidCallback onTap,
   }) {
-    final isSelected = value == selectedValue;
+    final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
           border: Border.all(
-            color: isSelected ? AppTheme.primaryColor : Colors.grey[300]!,
+            color: isSelected ? scheme.primary : scheme.outlineVariant,
             width: isSelected ? 2 : 1,
           ),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(14),
           color: isSelected
-              ? AppTheme.primaryColor.withValues(alpha: 0.1)
-              : Colors.white,
+              ? scheme.primaryContainer
+              : scheme.surfaceContainerLow,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: isSelected ? AppTheme.primaryColor : Colors.grey),
+            Icon(
+              icon,
+              color: isSelected
+                  ? scheme.onPrimaryContainer
+                  : scheme.onSurfaceVariant,
+            ),
             const SizedBox(width: 8),
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? AppTheme.primaryColor : Colors.black,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                color: isSelected
+                    ? scheme.onPrimaryContainer
+                    : scheme.onSurface,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
           ],
@@ -660,32 +719,27 @@ class _EditPetScreenState extends State<EditPetScreen> {
     );
   }
 
-  void _showImagePickerDialog(bool isPetImage) {
-    showDialog(
+  void _showImagePickerDialog({required bool isPetImage}) {
+    showModalBottomSheet(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Seleccionar imagen'),
-        content: Column(
+      builder: (sheetContext) => SafeArea(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading: const Icon(Icons.camera_alt),
               title: const Text('Cámara'),
               onTap: () {
-                Navigator.pop(context);
-                _pickImage(ImageSource.camera);
+                Navigator.pop(sheetContext);
+                _pickImage(ImageSource.camera, isPetImage: isPetImage);
               },
             ),
             ListTile(
               leading: const Icon(Icons.photo_library),
               title: const Text('Galería'),
               onTap: () {
-                Navigator.pop(context);
-                if (isPetImage) {
-                  _pickImage(ImageSource.gallery);
-                } else {
-                  _pickVaccineCard(ImageSource.gallery);
-                }
+                Navigator.pop(sheetContext);
+                _pickImage(ImageSource.gallery, isPetImage: isPetImage);
               },
             ),
           ],

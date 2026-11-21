@@ -1,0 +1,12 @@
+services:
+  ficha-pet-api:
+    build: .
+    container_name: ficha-pet-api
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - JWT_SECRET=${JWT_SECRET:-ficha_pet_production_secret_2026}
+    volumes:
+      - ./data:/usr/src/app/data

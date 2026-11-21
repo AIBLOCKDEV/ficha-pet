@@ -1,5 +1,7 @@
 class Pet {
   int? id;
+  String ownerId;
+  List<String> linkedVetIds;
   String name;
   String type; // 'dog' or 'cat'
   String birthday;
@@ -20,6 +22,8 @@ class Pet {
 
   Pet({
     this.id,
+    this.ownerId = '',
+    this.linkedVetIds = const [],
     required this.name,
     required this.type,
     required this.birthday,
@@ -61,9 +65,21 @@ class Pet {
     );
   }
 
+  /// Código corto clínico único para vincular desde la app del veterinario.
+  String get shareCode {
+    final raw = (id ?? 0).toString();
+    final suffix = raw.length > 6 ? raw.substring(raw.length - 6) : raw.padLeft(6, '0');
+    return 'FP-$suffix';
+  }
+
   factory Pet.fromJson(Map<String, dynamic> json) {
     return Pet(
-      id: json['id'],
+      id: (json['id'] as num?)?.toInt(),
+      ownerId: json['ownerId']?.toString() ?? '',
+      linkedVetIds: (json['linkedVetIds'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          const [],
       name: json['name'] ?? '',
       type: json['type'] ?? '',
       birthday: json['birthday'] ?? '',
@@ -93,7 +109,9 @@ class Pet {
 
   Map<String, dynamic> toJson() {
     return {
-      'id': id ?? DateTime.now().millisecondsSinceEpoch,
+      'id': id,
+      'ownerId': ownerId,
+      'linkedVetIds': linkedVetIds,
       'name': name,
       'type': type,
       'birthday': birthday,
@@ -116,6 +134,8 @@ class Pet {
 
   Pet copyWith({
     int? id,
+    String? ownerId,
+    List<String>? linkedVetIds,
     String? name,
     String? type,
     String? birthday,
@@ -136,6 +156,8 @@ class Pet {
   }) {
     return Pet(
       id: id ?? this.id,
+      ownerId: ownerId ?? this.ownerId,
+      linkedVetIds: linkedVetIds ?? this.linkedVetIds,
       name: name ?? this.name,
       type: type ?? this.type,
       birthday: birthday ?? this.birthday,
